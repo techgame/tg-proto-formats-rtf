@@ -125,7 +125,7 @@ class RTFDocBuilder(object):
 
     def read(self, file):
         for line in file:
-            self.feed
+            self.feed(line)
 
     _dispMap = None
     def _getDispatchMap(self):
