@@ -72,9 +72,9 @@ class RTFScanner(re.Scanner, object):
         return self.scan(line)
 
     def _on_open(self, scanner, item, expr):
-        return ('open',)
+        return ('openGroup',)
     def _on_close(self, scanner, item, expr):
-        return ('close',)
+        return ('closeGroup',)
     def _on_command(self, scanner, item, expr):
         args = expr.match(item+'\0').groups()
         return ('command',)+ args
@@ -92,7 +92,7 @@ class RTFScanner(re.Scanner, object):
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-class  RTFParser(object):
+class RTFParser(object):
     RTFScanner = RTFScanner
     _scanner = None
     def getScanner(self):
@@ -120,8 +120,9 @@ class RTFDocBuilder(object):
     root = result = last = None
 
     def __init__(self):
-        self.stack = []
         self.parser = self.RTFParser()
+        self.stack = []
+        self.openGroup()
 
     def read(self, file):
         for line in file:
@@ -132,7 +133,7 @@ class RTFDocBuilder(object):
         dispMap = self._dispMap
         if dispMap is None:
             dispMap = dict((k,getattr(self, k)) 
-                for k in ['open', 'close', 'command', 'symbol', 'body', 'raw'])
+                for k in ['openGroup', 'closeGroup', 'command', 'symbol', 'body', 'raw'])
             self._dispMap = dispMap
         return dispMap
 
@@ -142,24 +143,49 @@ class RTFDocBuilder(object):
             fn = dispMap[e[0]]
             fn(*e[1:])
 
+    def close(self):
+        r = self.last
+        while self.stack:
+            r = self.closeGroup()
+
+        r = self.asResultGroup(r)
+        self.result = r
+        return r
+
+    def asResultGroup(self, group):
+        return self.foldSimpleGroups(group)
+    def foldSimpleGroups(self, group):
+        while len(group) == 1 and isinstance(group[0], type(group)):
+            group = group[0]
+        return group
+
     newGroup = list
-    def open(self):
+    def addNewGroup(self, top):
         group = self.newGroup()
+        top.append(group)
+        return group
+    def newRootGroup(self):
+        group = self.newGroup()
+        self.root = group
+        return group
+    def openGroup(self):
         stack = self.stack
         if stack:
-            stack[-1].append(group)
-        elif self.root is None: 
-            self.root = group
-        else:
+            group = self.addNewGroup(stack[-1])
+        elif self.root is None:
+            group = self.newRootGroup()
+        else: 
             raise RuntimeError("Document already closed")
-        stack.append(group)
-    def close(self):
+
+        if group is not None:
+            stack.append(group)
+            return group
+    def closeGroup(self):
         stack = self.stack
         group = stack.pop()
         self.last = group
-        if not stack:
-            self.result = group
         return group
+
     def command(self, cmd, arg=None):
         self.addOp(cmd, arg)
     def symbol(self, sym):
@@ -178,9 +204,20 @@ class RTFDocBuilder(object):
         return e
     def addText(self, text):
         top = self.stack[-1]
-        if isinstance(top[-1], basestring):
+        if top and isinstance(top[-1], basestring):
             top[-1] += text
         else: top.append(text)
+
+class RTFPlaintextBuilder(RTFDocBuilder):
+    def raw(self, item):
+        top = self.stack[-1]
+        if top and isinstance(top[-1], basestring):
+            top[-1] += item
+        else: top.append(item)
+    def asResultGroup(self, group):
+        group = self.foldSimpleGroups(group)
+        group[:] = (e for e in group if isinstance(e, basestring))
+        return group
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~ Main 
@@ -189,12 +226,14 @@ class RTFDocBuilder(object):
 if __name__=='__main__':
     from pprint import pprint
     for fn in sys.argv[1:]:
-        builder = RTFDocBuilder()
+        #builder = RTFDocBuilder()
+        builder = RTFPlaintextBuilder()
         for line in open(fn, "rb"):
             builder.feed(line)
+        r = builder.close()
 
-        if builder.result:
-            pprint(builder.result)
-        else:
-            pprint(builder.root)
+        print
+        print "FILE:", fn
+        print ''.join(r)
+        #pprint(r)
 
