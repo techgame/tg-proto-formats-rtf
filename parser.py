@@ -13,6 +13,10 @@
 
 import os, sys
 import re
+try:
+    from cStringIO import StringIO
+except ImportError:
+    from StringIO import StringIO
 from functools import partial
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -103,16 +107,17 @@ class RTFParser(object):
         return r
     scanner = property(getScanner)
 
-    def feed(self, line):
+    def feed(self, data):
         r = []
-        for item in self.scanner(line):
-            if not item: continue
-            if isinstance(item, list):
-                r.extend(item)
-            else: 
-                assert '}' not in item
-                assert '{' not in item
-                r.append(('raw', item))
+        for line in StringIO(data):
+            for item in self.scanner(line):
+                if not item: continue
+                if isinstance(item, list):
+                    r.extend(item)
+                else: 
+                    assert '}' not in item
+                    assert '{' not in item
+                    r.append(('raw', item))
         return r
 
 class RTFDocBuilder(object):
@@ -124,9 +129,13 @@ class RTFDocBuilder(object):
         self.stack = []
         self.openGroup()
 
-    def read(self, file):
-        for line in file:
+    def read(self, aFile):
+        if isinstance(aFile, basestring):
+            raise ValueError("Read requires a file like object, not a string")
+        for line in aFile:
             self.feed(line)
+    def readData(self, aBuffer):
+        return self.read(StringIO(aBuffer))
 
     _dispMap = None
     def _getDispatchMap(self):
@@ -137,9 +146,9 @@ class RTFDocBuilder(object):
             self._dispMap = dispMap
         return dispMap
 
-    def feed(self, line):
+    def feed(self, aBuffer):
         dispMap = self._getDispatchMap()
-        for e in self.parser.feed(line):
+        for e in self.parser.feed(aBuffer):
             fn = dispMap[e[0]]
             fn(*e[1:])
 
@@ -218,6 +227,12 @@ class RTFPlaintextBuilder(RTFDocBuilder):
         group = self.foldSimpleGroups(group)
         group[:] = (e for e in group if isinstance(e, basestring))
         return group
+
+    @classmethod
+    def rtfAsText(klass, rtfText):
+        builder = klass()
+        builder.readData(rtfText)
+        return ''.join(builder.close())
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~ Main 
